@@ -116,9 +116,32 @@ var exporter = new GltfModelExporter(fileLoader)
     SatelliteImages = true,
 };
 
-exporter.Export(resource, outPath);
+try
+{
+    exporter.Export(resource, outPath);
+    Console.WriteLine("Done.");
+}
+catch (NullReferenceException ex) when ((ex.StackTrace ?? string.Empty).Contains("GltfModelExporter.LoadPhysicsMeshes", StringComparison.Ordinal))
+{
+    // VRF sometimes throws when exporting physics extras for some assets.
+    // Workaround: fall back to exporting the first .vmesh_c in the manifest (visual mesh only, no physics).
+    Console.WriteLine("[warn] VRF crashed while exporting physics; retrying by exporting a .vmesh_c instead (no physics)." );
 
-Console.WriteLine("Done.");
+    var vmeshRel = files.Select(f => f.Path).FirstOrDefault(p => p != null && p.EndsWith(".vmesh_c", StringComparison.OrdinalIgnoreCase));
+    if (vmeshRel == null)
+    {
+        throw; // nothing else we can do
+    }
+
+    var vmeshPath = Path.Combine(packageRoot, vmeshRel.Replace('/', Path.DirectorySeparatorChar));
+    using var meshResource = new Resource();
+    meshResource.Read(vmeshPath);
+
+    var meshOutPath = Path.Combine(packageRoot, $"{packageKey}_mesh{outExt}");
+    exporter.Export(meshResource, meshOutPath);
+
+    Console.WriteLine($"Done (mesh-only): {Path.GetFileName(meshOutPath)}");
+}
 
 static string? GetArg(List<string> args, string name)
 {
