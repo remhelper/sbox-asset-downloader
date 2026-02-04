@@ -1,7 +1,9 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ValveResourceFormat;
 using ValveResourceFormat.IO;
+using ValveResourceFormat.ResourceTypes;
 
 // Usage:
 //   dotnet run -- kvien/old_table01 --out out --format glb
@@ -117,27 +119,55 @@ var exporter = new GltfModelExporter(fileLoader)
     SatelliteImages = true,
 };
 
-if (!withPhysics && resource.DataBlock is ValveResourceFormat.ResourceTypes.Model model)
+if (!withPhysics && resource.DataBlock is Model model)
 {
     // VRF model export always attempts to export physics when present, and can crash for some assets.
-    // To guarantee "no physics", export the referenced .vmesh_c instead.
-    var refMeshName = model.GetReferenceMeshNamesAndLoD().Select(x => x.MeshName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+    // To guarantee "no physics", export *render meshes only*.
+    //
+    // Prefer using ModelExtract to obtain the actual Mesh objects (embedded or referenced) and then
+    // call the non-public GltfModelExporter.ExportToFile(...) mesh overload via reflection.
 
-    if (refMeshName == null)
+    var meshOutPath = Path.Combine(packageRoot, $"{packageKey}_mesh{outExt}");
+
+    try
     {
-        // Fall back to manifest scan
-        refMeshName = files.Select(f => f.Path).FirstOrDefault(p => p != null && p.EndsWith(".vmesh", StringComparison.OrdinalIgnoreCase));
+        var extractor = new ModelExtract(resource, fileLoader);
+        var renderMesh = extractor.RenderMeshesToExtract.FirstOrDefault();
+
+        if (renderMesh.Mesh != null)
+        {
+            var exportMeshMethod = typeof(GltfModelExporter).GetMethod(
+                "ExportToFile",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                types: [typeof(string), typeof(string), typeof(Mesh)],
+                modifiers: null);
+
+            if (exportMeshMethod == null)
+            {
+                throw new MissingMethodException("Could not find GltfModelExporter.ExportToFile(string,string,Mesh) via reflection");
+            }
+
+            exportMeshMethod.Invoke(exporter, [resource.FileName ?? packageKey, meshOutPath, renderMesh.Mesh]);
+            Console.WriteLine($"Done (mesh-only, no physics): {Path.GetFileName(meshOutPath)}");
+            return;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[warn] ModelExtract mesh-only path failed ({ex.GetType().Name}: {ex.Message}). Falling back to referenced vmesh export.");
     }
 
+    // Fallback: export the referenced .vmesh_c (requires the .vmesh_c file to be present on disk)
+    var refMeshName = model.GetReferenceMeshNamesAndLoD().Select(x => x.MeshName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
     if (refMeshName == null)
     {
-        throw new Exception("--with-physics not set, but could not find a referenced mesh to export");
+        throw new Exception("--with-physics not set, but could not find a mesh to export");
     }
 
     using var meshRes = fileLoader.LoadFileCompiled(refMeshName)
         ?? throw new FileNotFoundException($"Could not load referenced mesh: {refMeshName}");
 
-    var meshOutPath = Path.Combine(packageRoot, $"{packageKey}_mesh{outExt}");
     exporter.Export(meshRes, meshOutPath);
     Console.WriteLine($"Done (mesh-only, no physics): {Path.GetFileName(meshOutPath)}");
 }
