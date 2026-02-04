@@ -14,7 +14,11 @@ Download an S&box package (by `author/asset`) and export the primary `.vmdl_c` t
 ## Usage
 
 ```bash
+# Default: exports mesh-only to avoid VRF physics exporter crashes
 dotnet run --project src/Sbox2Gltf -- kvien/old_table01 --out out --format glb
+
+# If you explicitly want physics export too (may crash on some assets)
+dotnet run --project src/Sbox2Gltf -- kvien/old_table01 --out out --format glb --with-physics
 ```
 
 Outputs:

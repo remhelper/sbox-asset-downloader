@@ -14,13 +14,14 @@ using ValveResourceFormat.IO;
 var argsList = args.ToList();
 if (argsList.Count == 0 || argsList.Contains("-h") || argsList.Contains("--help"))
 {
-    Console.WriteLine("Usage: Sbox2Gltf <author/asset> [--out <dir>] [--format glb|gltf]");
+    Console.WriteLine("Usage: Sbox2Gltf <author/asset> [--out <dir>] [--format glb|gltf] [--with-physics]");
     return;
 }
 
 var id = argsList[0];
 var outDir = GetArg(argsList, "--out") ?? "out";
 var format = (GetArg(argsList, "--format") ?? "glb").ToLowerInvariant();
+var withPhysics = argsList.Contains("--with-physics");
 
 if (!id.Contains('/')) throw new ArgumentException("Expected <author/asset>");
 var author = id.Split('/')[0];
@@ -116,31 +117,34 @@ var exporter = new GltfModelExporter(fileLoader)
     SatelliteImages = true,
 };
 
-try
+if (!withPhysics && resource.DataBlock is ValveResourceFormat.ResourceTypes.Model model)
+{
+    // VRF model export always attempts to export physics when present, and can crash for some assets.
+    // To guarantee "no physics", export the referenced .vmesh_c instead.
+    var refMeshName = model.GetReferenceMeshNamesAndLoD().Select(x => x.MeshName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+
+    if (refMeshName == null)
+    {
+        // Fall back to manifest scan
+        refMeshName = files.Select(f => f.Path).FirstOrDefault(p => p != null && p.EndsWith(".vmesh", StringComparison.OrdinalIgnoreCase));
+    }
+
+    if (refMeshName == null)
+    {
+        throw new Exception("--with-physics not set, but could not find a referenced mesh to export");
+    }
+
+    using var meshRes = fileLoader.LoadFileCompiled(refMeshName)
+        ?? throw new FileNotFoundException($"Could not load referenced mesh: {refMeshName}");
+
+    var meshOutPath = Path.Combine(packageRoot, $"{packageKey}_mesh{outExt}");
+    exporter.Export(meshRes, meshOutPath);
+    Console.WriteLine($"Done (mesh-only, no physics): {Path.GetFileName(meshOutPath)}");
+}
+else
 {
     exporter.Export(resource, outPath);
     Console.WriteLine("Done.");
-}
-catch (NullReferenceException ex) when ((ex.StackTrace ?? string.Empty).Contains("GltfModelExporter.LoadPhysicsMeshes", StringComparison.Ordinal))
-{
-    // VRF sometimes throws when exporting physics extras for some assets.
-    // Workaround: fall back to exporting the first .vmesh_c in the manifest (visual mesh only, no physics).
-    Console.WriteLine("[warn] VRF crashed while exporting physics; retrying by exporting a .vmesh_c instead (no physics)." );
-
-    var vmeshRel = files.Select(f => f.Path).FirstOrDefault(p => p != null && p.EndsWith(".vmesh_c", StringComparison.OrdinalIgnoreCase));
-    if (vmeshRel == null)
-    {
-        throw; // nothing else we can do
-    }
-
-    var vmeshPath = Path.Combine(packageRoot, vmeshRel.Replace('/', Path.DirectorySeparatorChar));
-    using var meshResource = new Resource();
-    meshResource.Read(vmeshPath);
-
-    var meshOutPath = Path.Combine(packageRoot, $"{packageKey}_mesh{outExt}");
-    exporter.Export(meshResource, meshOutPath);
-
-    Console.WriteLine($"Done (mesh-only): {Path.GetFileName(meshOutPath)}");
 }
 
 static string? GetArg(List<string> args, string name)
