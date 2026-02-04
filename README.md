@@ -23,7 +23,11 @@ dotnet run --project src/Sbox2Gltf -- kvien/old_table01 --out out --format glb -
 
 Outputs:
 - `out/kvien.old_table01/` (downloaded assets)
-- `out/kvien.old_table01/kvien.old_table01.glb` (or `.gltf`)
+- `out/kvien.old_table01/kvien.old_table01_mesh.glb` (default, mesh-only/no physics)
+- `out/kvien.old_table01/kvien.old_table01.glb` (with `--with-physics`)
+
+Texture note:
+- For `.glb` export, textures are embedded (VRF `SatelliteImages` is disabled).
 
 ## Notes / caveats
 

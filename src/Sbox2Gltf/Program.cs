@@ -116,7 +116,10 @@ var exporter = new GltfModelExporter(fileLoader)
     ExportMaterials = true,
     ExportAnimations = true,
     AdaptTextures = true,
-    SatelliteImages = true,
+
+    // Important: when exporting as .glb, keep textures embedded.
+    // Satellite images can result in external image files / missing textures in some viewers.
+    SatelliteImages = false,
 };
 
 if (!withPhysics && resource.DataBlock is Model model)
